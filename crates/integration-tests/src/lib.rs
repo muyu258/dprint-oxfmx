@@ -36,104 +36,102 @@ mod tests {
             .await
             .expect("plugin process should start");
 
-            let cases = [
-                (
-                    "typescript",
-                    "typescript.input.ts",
-                    "typescript.expected.ts",
-                    ConfigKeyMap::new(),
-                    false,
-                ),
-                (
-                    "single-quote",
-                    "single-quote.input.ts",
-                    "single-quote.expected.ts",
-                    single_quote_config(),
-                    false,
-                ),
-                (
-                    "already-formatted",
-                    "already-formatted.input.ts",
-                    "already-formatted.expected.ts",
-                    ConfigKeyMap::new(),
-                    true,
-                ),
-            ];
+            format_core_fixtures(&communicator).await;
+            verify_syntax_error(&communicator).await;
 
-            for (index, (name, input_name, expected_name, config, unchanged)) in
-                cases.into_iter().enumerate()
-            {
-                let config_id = FormatConfigId::from_raw(
-                    u32::try_from(index + 1).expect("fixture index should fit in a config id"),
-                );
-                communicator
-                    .register_config(config_id, &GlobalConfiguration::default(), &config)
-                    .await
-                    .unwrap_or_else(|error| panic!("{name} config should register: {error}"));
+            communicator.shutdown().await;
+        });
+    }
 
-                let input_path = basic_fixture_path(input_name);
-                let input = std::fs::read(&input_path)
-                    .unwrap_or_else(|error| panic!("{name} input should be readable: {error}"));
-                let expected_path = basic_fixture_path(expected_name);
-                let expected = std::fs::read(&expected_path).unwrap_or_else(|error| {
-                    panic!("{name} expected output should be readable: {error}")
-                });
+    async fn format_core_fixtures(communicator: &ProcessPluginCommunicator) {
+        let cases = [
+            (
+                "typescript",
+                "typescript.input.ts",
+                "typescript.expected.ts",
+                ConfigKeyMap::new(),
+                false,
+            ),
+            (
+                "single-quote",
+                "single-quote.input.ts",
+                "single-quote.expected.ts",
+                single_quote_config(),
+                false,
+            ),
+            (
+                "already-formatted",
+                "already-formatted.input.ts",
+                "already-formatted.expected.ts",
+                ConfigKeyMap::new(),
+                true,
+            ),
+        ];
 
-                let result = communicator
-                    .format_text(ProcessPluginCommunicatorFormatRequest {
-                        file_path: input_path,
-                        file_bytes: input,
-                        range: None,
-                        config_id,
-                        override_config: ConfigKeyMap::new(),
-                        on_host_format: Rc::new(|_request| Box::pin(async { Ok(None) })),
-                        token: Arc::new(NullCancellationToken),
-                    })
-                    .await
-                    .unwrap_or_else(|error| panic!("{name} format should succeed: {error}"));
-
-                if unchanged {
-                    assert_eq!(result, None, "{name} should report no change");
-                } else {
-                    assert_eq!(result, Some(expected), "{name} output should match Oxfmt");
-                }
-            }
-
-            let error_config_id = FormatConfigId::from_raw(4);
-            let error_config = ConfigKeyMap::new();
+        for (index, (name, input_name, expected_name, config, unchanged)) in
+            cases.into_iter().enumerate()
+        {
+            let config_id = FormatConfigId::from_raw(
+                u32::try_from(index + 1).expect("fixture index should fit in a config id"),
+            );
             communicator
-                .register_config(
-                    error_config_id,
-                    &GlobalConfiguration::default(),
-                    &error_config,
-                )
+                .register_config(config_id, &GlobalConfiguration::default(), &config)
                 .await
-                .expect("error config should register");
-            let error_path = error_fixture_path("syntax-error.input.ts");
-            let error = communicator
+                .unwrap_or_else(|error| panic!("{name} config should register: {error}"));
+
+            let input_path = basic_fixture_path(input_name);
+            let input = std::fs::read(&input_path)
+                .unwrap_or_else(|error| panic!("{name} input should be readable: {error}"));
+            let expected_path = basic_fixture_path(expected_name);
+            let expected = std::fs::read(&expected_path)
+                .unwrap_or_else(|error| panic!("{name} expected should be readable: {error}"));
+            let result = communicator
                 .format_text(ProcessPluginCommunicatorFormatRequest {
-                    file_path: error_path.clone(),
-                    file_bytes: std::fs::read(&error_path).expect("error input should be readable"),
+                    file_path: input_path,
+                    file_bytes: input,
                     range: None,
-                    config_id: error_config_id,
+                    config_id,
                     override_config: ConfigKeyMap::new(),
                     on_host_format: Rc::new(|_request| Box::pin(async { Ok(None) })),
                     token: Arc::new(NullCancellationToken),
                 })
                 .await
-                .expect_err("syntax errors should fail formatting");
-            let error_message = error.to_string();
-            assert!(
-                error_message.contains("syntax-error.input.ts"),
-                "diagnostic should identify the file: {error_message}"
-            );
-            assert!(
-                error_message.contains("Unexpected token"),
-                "diagnostic should include Oxfmt's message: {error_message}"
-            );
+                .unwrap_or_else(|error| panic!("{name} format should succeed: {error}"));
 
-            communicator.shutdown().await;
-        });
+            if unchanged {
+                assert_eq!(result, None, "{name} should report no change");
+            } else {
+                assert_eq!(result, Some(expected), "{name} output should match Oxfmt");
+            }
+        }
+    }
+
+    async fn verify_syntax_error(communicator: &ProcessPluginCommunicator) {
+        let config_id = FormatConfigId::from_raw(4);
+        communicator
+            .register_config(
+                config_id,
+                &GlobalConfiguration::default(),
+                &ConfigKeyMap::new(),
+            )
+            .await
+            .expect("error config should register");
+        let file_path = error_fixture_path("syntax-error.input.ts");
+        let error = communicator
+            .format_text(ProcessPluginCommunicatorFormatRequest {
+                file_path: file_path.clone(),
+                file_bytes: std::fs::read(&file_path).expect("error input should be readable"),
+                range: None,
+                config_id,
+                override_config: ConfigKeyMap::new(),
+                on_host_format: Rc::new(|_request| Box::pin(async { Ok(None) })),
+                token: Arc::new(NullCancellationToken),
+            })
+            .await
+            .expect_err("syntax errors should fail formatting")
+            .to_string();
+        assert!(error.contains("syntax-error.input.ts"));
+        assert!(error.contains("Unexpected token"));
     }
 
     #[test]
