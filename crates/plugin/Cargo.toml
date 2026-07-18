@@ -9,7 +9,7 @@ publish = false
 dprint-core = { version = "=0.68.2", default-features = false, features = ["process"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["io-util", "process", "rt", "sync", "time"] }
 
 [lints]
 workspace = true
