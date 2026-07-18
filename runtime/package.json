@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test dist/protocol.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
+  },
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": "24.16.0"
