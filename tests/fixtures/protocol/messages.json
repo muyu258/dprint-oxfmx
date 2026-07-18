@@ -48,7 +48,22 @@
     "message": {
       "type": "formatResult",
       "id": 42,
-      "code": "const value = { nested: true };\n"
+      "code": "const value = { nested: true };\n",
+      "errors": [
+        {
+          "severity": "Warning",
+          "message": "example formatter warning",
+          "labels": [
+            {
+              "message": "example label",
+              "start": 0,
+              "end": 5
+            }
+          ],
+          "helpMessage": null,
+          "codeframe": null
+        }
+      ]
     }
   },
   {

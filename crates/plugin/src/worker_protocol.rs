@@ -39,6 +39,7 @@ pub enum ServerMessage {
     FormatResult {
         id: u32,
         code: String,
+        errors: Vec<FormatDiagnostic>,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,6 +47,30 @@ pub enum ServerMessage {
         error: WorkerError,
     },
     ShutdownComplete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FormatDiagnostic {
+    pub severity: DiagnosticSeverity,
+    pub message: String,
+    pub labels: Vec<DiagnosticLabel>,
+    pub help_message: Option<String>,
+    pub codeframe: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DiagnosticSeverity {
+    Error,
+    Warning,
+    Advice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosticLabel {
+    pub message: Option<String>,
+    pub start: u32,
+    pub end: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
