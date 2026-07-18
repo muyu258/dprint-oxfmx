@@ -27,6 +27,7 @@ export async function runWorker(
   input: Readable = process.stdin,
   output: Writable = process.stdout,
 ): Promise<void> {
+  assertSupportedNodeVersion();
   const lines = createInterface({ input, crlfDelay: Number.POSITIVE_INFINITY });
   let initialized = false;
 
@@ -150,6 +151,15 @@ function normalizeError(
     return { kind, message: error.message, stack: error.stack, fileName };
   }
   return { kind, message: String(error), fileName };
+}
+
+export function assertSupportedNodeVersion(): void {
+  const expected = "24.16.0";
+  if (process.versions.node !== expected) {
+    throw new Error(
+      `Oxfmt worker requires Node ${expected}; detected ${process.versions.node}`,
+    );
+  }
 }
 
 const entryPath = process.argv[1];
