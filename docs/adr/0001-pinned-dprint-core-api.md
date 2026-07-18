@@ -26,4 +26,3 @@ plugin sets `update_url` to `None` and returns
 Upgrading `dprint-core` requires checking both the upstream guide and the
 pinned crate source again. Any new discrepancy affecting protocol, lifecycle,
 or packaging must be documented before the upgrade is merged.
-
