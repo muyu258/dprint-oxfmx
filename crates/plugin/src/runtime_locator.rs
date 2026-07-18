@@ -83,13 +83,18 @@ fn worker_candidates() -> Vec<PathBuf> {
         return vec![PathBuf::from(worker_override)];
     }
 
-    let mut candidates =
-        vec![PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/dist/worker.js")];
-    if let Ok(executable) = env::current_exe()
-        && let Some(parent) = executable.parent()
-    {
-        candidates.push(parent.join("runtime/worker.js"));
+    default_worker_candidates(env::current_exe().ok().as_deref())
+}
+
+fn default_worker_candidates(executable: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(parent) = executable.and_then(Path::parent) {
         candidates.push(parent.join("runtime/dist/worker.js"));
+        candidates.push(parent.join("runtime/worker.js"));
+    }
+    if cfg!(debug_assertions) {
+        candidates
+            .push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/dist/worker.js"));
     }
     candidates
 }
@@ -107,6 +112,29 @@ mod tests {
 
         assert_eq!(locator.node_program(), Path::new("custom-node"));
         assert_eq!(locator.worker_entry(), Path::new("custom-worker.js"));
+    }
+
+    #[test]
+    fn packaged_workers_precede_the_development_worker() {
+        let executable = Path::new("package/bin/dprint-plugin-oxfmt");
+        let candidates = default_worker_candidates(Some(executable));
+
+        assert_eq!(
+            candidates.first(),
+            Some(&PathBuf::from("package/bin/runtime/dist/worker.js"))
+        );
+        assert_eq!(
+            candidates.get(1),
+            Some(&PathBuf::from("package/bin/runtime/worker.js"))
+        );
+        if cfg!(debug_assertions) {
+            assert_eq!(
+                candidates.last(),
+                Some(
+                    &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/dist/worker.js")
+                )
+            );
+        }
     }
 
     #[test]
