@@ -34,6 +34,23 @@ export type FormatResultResponse = {
   type: "formatResult";
   id: number;
   code: string;
+  errors: FormatDiagnostic[];
+};
+
+export type FormatDiagnostic = {
+  severity: DiagnosticSeverity;
+  message: string;
+  labels: DiagnosticLabel[];
+  helpMessage: string | null;
+  codeframe: string | null;
+};
+
+export type DiagnosticSeverity = "Error" | "Warning" | "Advice";
+
+export type DiagnosticLabel = {
+  message: string | null;
+  start: number;
+  end: number;
 };
 
 export type WorkerErrorKind = "protocol" | "format" | "internal";
