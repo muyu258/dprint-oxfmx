@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.3
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: runtime/pnpm-lock.yaml
+
+      - name: Install runtime dependencies
+        run: pnpm --dir runtime install --frozen-lockfile
+
+      - name: Check runtime types
+        run: pnpm --dir runtime run typecheck
+
+      - name: Test runtime
+        run: pnpm --dir runtime test
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --all-targets
+
+      - name: Check Rust lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build runtime
+        run: pnpm --dir runtime run build
+
+      - name: Build process plugin
+        run: cargo build -p dprint-plugin-oxfmt
+
+      - name: Run process integration parity
+        run: cargo test -p dprint-plugin-oxfmt-integration-tests --lib -- --include-ignored
