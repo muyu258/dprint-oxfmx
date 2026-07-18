@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Map;
 use serde_json::Value;
 
 pub const WORKER_PROTOCOL_VERSION: u32 = 1;
@@ -15,10 +16,10 @@ pub enum ClientMessage {
         protocol_version: u32,
     },
     Format {
-        id: u64,
+        id: u32,
         file_name: String,
         source_text: String,
-        options: Value,
+        options: Map<String, Value>,
     },
     Shutdown,
 }
@@ -36,12 +37,12 @@ pub enum ServerMessage {
         oxfmt_version: String,
     },
     FormatResult {
-        id: u64,
+        id: u32,
         code: String,
     },
     Error {
         #[serde(skip_serializing_if = "Option::is_none")]
-        id: Option<u64>,
+        id: Option<u32>,
         error: WorkerError,
     },
     ShutdownComplete,
@@ -119,6 +120,34 @@ mod tests {
 
             assert_eq!(round_tripped, fixture.message, "fixture: {}", fixture.name);
         }
+    }
+
+    #[test]
+    fn rejects_non_object_options() {
+        let error = serde_json::from_value::<ClientMessage>(serde_json::json!({
+            "type": "format",
+            "id": 1,
+            "fileName": "/example.ts",
+            "sourceText": "",
+            "options": []
+        }))
+        .expect_err("non-object options should fail");
+
+        assert!(error.to_string().contains("map"));
+    }
+
+    #[test]
+    fn rejects_out_of_range_request_identifiers() {
+        let error = serde_json::from_value::<ClientMessage>(serde_json::json!({
+            "type": "format",
+            "id": u64::from(u32::MAX) + 1,
+            "fileName": "/example.ts",
+            "sourceText": "",
+            "options": {}
+        }))
+        .expect_err("out-of-range request identifiers should fail");
+
+        assert!(error.to_string().contains("u32"));
     }
 
     #[test]

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/protocol.test.js",
+    "test": "pnpm run build && node --test dist/protocol.test.js",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

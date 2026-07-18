@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  MAX_REQUEST_ID,
   parseClientMessage,
   ProtocolParseError,
   serializeServerMessage,
@@ -59,18 +60,18 @@ test("rejects a non-object options value", () => {
   );
 });
 
-test("rejects unsafe request identifiers", () => {
+test("rejects out-of-range request identifiers", () => {
   assert.throws(
     () =>
       parseClientMessage(
         JSON.stringify({
           type: "format",
-          id: Number.MAX_SAFE_INTEGER + 1,
+          id: MAX_REQUEST_ID + 1,
           fileName: "/example.ts",
           sourceText: "",
           options: {},
         }),
       ),
-    /id must be a non-negative integer/,
+    /id must not exceed/,
   );
 });

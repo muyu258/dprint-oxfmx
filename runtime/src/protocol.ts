@@ -1,4 +1,5 @@
 export const WORKER_PROTOCOL_VERSION = 1;
+export const MAX_REQUEST_ID = 0xffff_ffff;
 
 export type InitializeRequest = {
   type: "initialize";
@@ -89,7 +90,7 @@ export function parseClientMessage(line: string): ClientMessage {
         protocolVersion: value.protocolVersion,
       };
     case "format":
-      assertNonNegativeInteger(value.id, "id");
+      assertRequestId(value.id);
       assertString(value.fileName, "fileName");
       assertString(value.sourceText, "sourceText");
       if (!isRecord(value.options)) {
@@ -115,6 +116,13 @@ export function serializeServerMessage(message: ServerMessage): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertRequestId(value: unknown): asserts value is number {
+  assertNonNegativeInteger(value, "id");
+  if (value > MAX_REQUEST_ID) {
+    throw new ProtocolParseError(`id must not exceed ${MAX_REQUEST_ID}`);
+  }
 }
 
 function assertNonNegativeInteger(
