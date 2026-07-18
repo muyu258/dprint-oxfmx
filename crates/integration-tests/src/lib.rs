@@ -2,7 +2,10 @@
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use std::path::PathBuf;
+    use std::process::Command;
+    use std::process::Stdio;
     use std::rc::Rc;
     use std::sync::Arc;
 
@@ -38,10 +41,18 @@ mod tests {
                 .await
                 .expect("plugin config should register");
 
+            let file_path = PathBuf::from("/tmp/dprint-plugin-oxfmt-example.ts");
+            let source_text = "const value=\"hello\"\n";
+            let options = serde_json::json!({ "singleQuote": true });
+            let expected = direct_oxfmt(&file_path, source_text, &options);
+            let expected_code = expected["code"]
+                .as_str()
+                .expect("Oxfmt oracle should return code");
+
             let result = communicator
                 .format_text(ProcessPluginCommunicatorFormatRequest {
-                    file_path: PathBuf::from("/tmp/dprint-plugin-oxfmt-example.ts"),
-                    file_bytes: b"const value=\"hello\"\n".to_vec(),
+                    file_path,
+                    file_bytes: source_text.as_bytes().to_vec(),
                     range: None,
                     config_id,
                     override_config: ConfigKeyMap::new(),
@@ -51,9 +62,51 @@ mod tests {
                 .await
                 .expect("format request should succeed");
 
-            assert_eq!(result, Some(b"const value = 'hello';\n".to_vec()));
+            assert_eq!(result, Some(expected_code.as_bytes().to_vec()));
             communicator.shutdown().await;
         });
+    }
+
+    fn direct_oxfmt(
+        file_path: &std::path::Path,
+        source_text: &str,
+        options: &serde_json::Value,
+    ) -> serde_json::Value {
+        let request = serde_json::json!({
+            "fileName": file_path,
+            "sourceText": source_text,
+            "options": options,
+        });
+        let mut child = Command::new(node_program())
+            .arg(oracle_path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Oxfmt oracle should start");
+        child
+            .stdin
+            .take()
+            .expect("oracle stdin should be piped")
+            .write_all(request.to_string().as_bytes())
+            .expect("oracle request should be writable");
+        let output = child.wait_with_output().expect("Oxfmt oracle should exit");
+        assert!(
+            output.status.success(),
+            "Oxfmt oracle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).expect("Oxfmt oracle output should be JSON")
+    }
+
+    fn node_program() -> PathBuf {
+        std::env::var_os("DPRINT_OXFMT_NODE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("node"))
+    }
+
+    fn oracle_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/dist/oracle.js")
     }
 
     fn plugin_binary_path() -> PathBuf {
