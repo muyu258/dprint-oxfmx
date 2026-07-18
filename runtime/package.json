@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "pnpm run build && node --test dist/protocol.test.js",
-    "typecheck": "tsc --noEmit"
+    "test": "pnpm run build && node --test dist/protocol.test.js dist/worker.test.js",
+    "typecheck": "tsc --noEmit",
+    "worker": "node dist/worker.js"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
