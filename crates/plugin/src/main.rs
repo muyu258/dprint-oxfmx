@@ -1,6 +1,7 @@
 mod configuration;
 mod handler;
 mod mock_worker;
+pub mod worker_protocol;
 
 use dprint_core::plugins::FormatError;
 use dprint_core::plugins::process::get_parent_process_id_from_cli_args;
