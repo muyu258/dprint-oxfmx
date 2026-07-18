@@ -1,5 +1,6 @@
+import { realpathSync } from "node:fs";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { once } from "node:events";
@@ -163,7 +164,10 @@ export function assertSupportedNodeVersion(): void {
 }
 
 const entryPath = process.argv[1];
-if (entryPath !== undefined && import.meta.url === pathToFileURL(entryPath).href) {
+if (
+  entryPath !== undefined &&
+  realpathSync(fileURLToPath(import.meta.url)) === realpathSync(entryPath)
+) {
   runWorker().catch(async (error: unknown) => {
     const message: ServerMessage = {
       type: "error",
