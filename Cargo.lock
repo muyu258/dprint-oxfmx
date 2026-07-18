@@ -81,6 +81,7 @@ name = "dprint-plugin-oxfmt-integration-tests"
 version = "0.1.0"
 dependencies = [
  "dprint-core",
+ "serde_json",
  "tokio",
 ]
 
