@@ -35,50 +35,29 @@ jobs:
       - name: Build package
         run: scripts/package.sh
 
-      - name: Verify package archive
+      - name: Install pinned dprint CLI
         shell: bash
         run: |
           set -euo pipefail
-          archive=$(find dist/releases -name '*.tar.gz' -print -quit)
-          checksum="${archive}.sha256"
-          test -n "$archive"
-          test -f "$checksum"
-          shasum -a 256 --check "$checksum"
+          dprint_version=$(tr -d '[:space:]' < .dprint-version)
+          dprint_prefix="$RUNNER_TEMP/dprint-cli"
+          npm install \
+            --prefix "$dprint_prefix" \
+            --ignore-scripts \
+            --no-package-lock \
+            --no-save \
+            "dprint@$dprint_version"
+          printf 'DPRINT_BIN=%s/node_modules/.bin/dprint\n' "$dprint_prefix" >> "$GITHUB_ENV"
 
-          workdir=$(mktemp -d)
-          trap 'rm -rf "$workdir"' EXIT
-          tar -xzf "$archive" -C "$workdir"
-          tar -tzf "$archive" > "$workdir/archive.contents"
-          grep -Fx './runtime/dist/worker.js' "$workdir/archive.contents"
-          grep -Fx './runtime/dist/protocol.js' "$workdir/archive.contents"
-          grep -Fx './runtime/package.json' "$workdir/archive.contents"
-          ! grep -Fx './runtime/worker.js' "$workdir/archive.contents"
-
-          node - "$workdir/plugin-manifest.json" <<'NODE'
-          const fs = require("node:fs");
-          const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-          if (manifest.worker !== "runtime/dist/worker.js") {
-            throw new Error(`unexpected worker path: ${manifest.worker}`);
-          }
-          NODE
-
-          printf '%s\n%s\n' \
-            '{"type":"initialize","protocolVersion":1}' \
-            '{"type":"shutdown"}' \
-            | node "$workdir/runtime/dist/worker.js" \
-                > "$workdir/worker.stdout" \
-                2> "$workdir/worker.stderr"
-          test ! -s "$workdir/worker.stderr"
-          node - "$workdir/worker.stdout" <<'NODE'
-          const assert = require("node:assert/strict");
-          const fs = require("node:fs");
-          const messages = fs.readFileSync(process.argv[2], "utf8")
-            .trim()
-            .split("\n")
-            .map((line) => JSON.parse(line));
-          assert.equal(messages[0].type, "initialized");
-          assert.deepEqual(messages[1], { type: "shutdownComplete" });
-          NODE
+      - name: Verify package with dprint CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(dist/releases/*.tar.gz)
+          test "${#archives[@]}" -eq 1
+          test -f "${archives[0]}.sha256"
+          scripts/smoke-dprint-cli.sh "${archives[0]}"
 
       - name: Upload checksummed artifact
         uses: actions/upload-artifact@v4
