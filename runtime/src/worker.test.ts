@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
-import { PassThrough } from "node:stream";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -151,4 +154,46 @@ test("reports protocol failures without terminating the worker", async () => {
   assert.equal(duplicateInitialize.type, "error");
 
   await worker.close();
+});
+
+test("runs as a standalone stdio worker", async () => {
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("./worker.js", import.meta.url))],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+  const lines = createInterface({ input: child.stdout });
+  const iterator = lines[Symbol.asyncIterator]();
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  child.stdin.write(
+    `${JSON.stringify({
+      type: "initialize",
+      protocolVersion: WORKER_PROTOCOL_VERSION,
+    })}\n`,
+  );
+  const initialized = await iterator.next();
+  assert.equal(initialized.done, false);
+  assert.equal(
+    (JSON.parse(initialized.value) as ServerMessage).type,
+    "initialized",
+  );
+
+  child.stdin.write(`${JSON.stringify({ type: "shutdown" })}\n`);
+  const shutdown = await iterator.next();
+  assert.equal(shutdown.done, false);
+  assert.deepEqual(JSON.parse(shutdown.value), { type: "shutdownComplete" });
+
+  const [exitCode, signal] = (await once(child, "exit")) as [
+    number | null,
+    NodeJS.Signals | null,
+  ];
+  assert.equal(exitCode, 0);
+  assert.equal(signal, null);
+  assert.equal(stderr, "");
+  lines.close();
 });
