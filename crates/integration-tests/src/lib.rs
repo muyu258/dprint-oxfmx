@@ -3,7 +3,7 @@
 #[cfg(test)]
 mod tests {
     use std::io::Write;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::process::Stdio;
     use std::rc::Rc;
@@ -18,15 +18,137 @@ mod tests {
     use dprint_core::plugins::process::ProcessPluginCommunicatorFormatRequest;
 
     #[test]
-    #[ignore = "requires the plugin binary to be built"]
+    #[ignore = "requires the runtime and plugin binary to be built"]
+    fn formats_core_fixtures_through_real_dprint_and_node_processes() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed creating Tokio runtime");
+
+        runtime.block_on(async {
+            let plugin = plugin_binary_path();
+            assert_file_exists(&plugin, "plugin binary");
+            assert_file_exists(&worker_entry_path(), "Node worker");
+
+            let communicator = ProcessPluginCommunicator::new(&plugin, |message| {
+                eprintln!("plugin stderr: {message}");
+            })
+            .await
+            .expect("plugin process should start");
+
+            let cases = [
+                (
+                    "typescript",
+                    "typescript.input.ts",
+                    "typescript.expected.ts",
+                    ConfigKeyMap::new(),
+                    false,
+                ),
+                (
+                    "single-quote",
+                    "single-quote.input.ts",
+                    "single-quote.expected.ts",
+                    single_quote_config(),
+                    false,
+                ),
+                (
+                    "already-formatted",
+                    "already-formatted.input.ts",
+                    "already-formatted.expected.ts",
+                    ConfigKeyMap::new(),
+                    true,
+                ),
+            ];
+
+            for (index, (name, input_name, expected_name, config, unchanged)) in
+                cases.into_iter().enumerate()
+            {
+                let config_id = FormatConfigId::from_raw(
+                    u32::try_from(index + 1).expect("fixture index should fit in a config id"),
+                );
+                communicator
+                    .register_config(config_id, &GlobalConfiguration::default(), &config)
+                    .await
+                    .unwrap_or_else(|error| panic!("{name} config should register: {error}"));
+
+                let input_path = basic_fixture_path(input_name);
+                let input = std::fs::read(&input_path)
+                    .unwrap_or_else(|error| panic!("{name} input should be readable: {error}"));
+                let expected_path = basic_fixture_path(expected_name);
+                let expected = std::fs::read(&expected_path).unwrap_or_else(|error| {
+                    panic!("{name} expected output should be readable: {error}")
+                });
+
+                let result = communicator
+                    .format_text(ProcessPluginCommunicatorFormatRequest {
+                        file_path: input_path,
+                        file_bytes: input,
+                        range: None,
+                        config_id,
+                        override_config: ConfigKeyMap::new(),
+                        on_host_format: Rc::new(|_request| Box::pin(async { Ok(None) })),
+                        token: Arc::new(NullCancellationToken),
+                    })
+                    .await
+                    .unwrap_or_else(|error| panic!("{name} format should succeed: {error}"));
+
+                if unchanged {
+                    assert_eq!(result, None, "{name} should report no change");
+                } else {
+                    assert_eq!(result, Some(expected), "{name} output should match Oxfmt");
+                }
+            }
+
+            let error_config_id = FormatConfigId::from_raw(4);
+            let error_config = ConfigKeyMap::new();
+            communicator
+                .register_config(
+                    error_config_id,
+                    &GlobalConfiguration::default(),
+                    &error_config,
+                )
+                .await
+                .expect("error config should register");
+            let error_path = error_fixture_path("syntax-error.input.ts");
+            let error = communicator
+                .format_text(ProcessPluginCommunicatorFormatRequest {
+                    file_path: error_path.clone(),
+                    file_bytes: std::fs::read(&error_path).expect("error input should be readable"),
+                    range: None,
+                    config_id: error_config_id,
+                    override_config: ConfigKeyMap::new(),
+                    on_host_format: Rc::new(|_request| Box::pin(async { Ok(None) })),
+                    token: Arc::new(NullCancellationToken),
+                })
+                .await
+                .expect_err("syntax errors should fail formatting");
+            let error_message = error.to_string();
+            assert!(
+                error_message.contains("syntax-error.input.ts"),
+                "diagnostic should identify the file: {error_message}"
+            );
+            assert!(
+                error_message.contains("Unexpected token"),
+                "diagnostic should include Oxfmt's message: {error_message}"
+            );
+
+            communicator.shutdown().await;
+        });
+    }
+
+    #[test]
+    #[ignore = "requires the runtime and plugin binary to be built"]
     fn formats_through_the_real_dprint_and_node_processes() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("failed creating test runtime");
+            .expect("failed creating Tokio runtime");
 
         runtime.block_on(async {
             let plugin = plugin_binary_path();
+            assert_file_exists(&plugin, "plugin binary");
+            assert_file_exists(&worker_entry_path(), "Node worker");
+
             let communicator = ProcessPluginCommunicator::new(&plugin, |message| {
                 eprintln!("plugin stderr: {message}");
             })
@@ -67,8 +189,33 @@ mod tests {
         });
     }
 
+    fn single_quote_config() -> ConfigKeyMap {
+        let mut config = ConfigKeyMap::new();
+        config.insert("singleQuote".to_owned(), ConfigKeyValue::Bool(true));
+        config
+    }
+
+    fn basic_fixture_path(name: &str) -> PathBuf {
+        fixture_path("basic", name)
+    }
+
+    fn error_fixture_path(name: &str) -> PathBuf {
+        fixture_path("errors", name)
+    }
+
+    fn fixture_path(category: &str, name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures")
+            .join(category)
+            .join(name)
+    }
+
+    fn worker_entry_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/dist/worker.js")
+    }
+
     fn direct_oxfmt(
-        file_path: &std::path::Path,
+        file_path: &Path,
         source_text: &str,
         options: &serde_json::Value,
     ) -> serde_json::Value {
@@ -108,15 +255,27 @@ mod tests {
     }
 
     fn plugin_binary_path() -> PathBuf {
+        if let Some(path) = std::env::var_os("DPRINT_OXFMT_PLUGIN") {
+            return PathBuf::from(path);
+        }
+
         let current_exe = std::env::current_exe().expect("test executable path should exist");
         let debug_dir = current_exe
             .parent()
-            .and_then(std::path::Path::parent)
+            .and_then(Path::parent)
             .expect("test executable should be under target/debug/deps");
         let mut plugin = debug_dir.join("dprint-plugin-oxfmt");
         if cfg!(windows) {
             plugin.set_extension("exe");
         }
         plugin
+    }
+
+    fn assert_file_exists(path: &Path, description: &str) {
+        assert!(
+            path.is_file(),
+            "{description} not found at {}. Build it first with `pnpm --dir runtime build` and `cargo build -p dprint-plugin-oxfmt`.",
+            path.display()
+        );
     }
 }
