@@ -1,0 +1,10 @@
+[package]
+name = "dprint-plugin-oxfmt-integration-tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
