@@ -9,10 +9,8 @@ const JAVASCRIPT_AND_TYPESCRIPT_EXTENSIONS: &[&str] =
     &["js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ResolvedConfiguration {
     pub options: serde_json::Value,
-    pub project_root: Option<String>,
 }
 
 pub fn resolve_configuration(
@@ -30,10 +28,7 @@ pub fn resolve_configuration(
             file_names: Vec::new(),
         },
         diagnostics: Vec::new(),
-        config: ResolvedConfiguration {
-            options,
-            project_root: None,
-        },
+        config: ResolvedConfiguration { options },
     }
 }
 
