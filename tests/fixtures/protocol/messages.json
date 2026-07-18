@@ -1,0 +1,86 @@
+[
+  {
+    "name": "initialize request",
+    "direction": "client",
+    "message": {
+      "type": "initialize",
+      "protocolVersion": 1
+    }
+  },
+  {
+    "name": "format request with opaque options",
+    "direction": "client",
+    "message": {
+      "type": "format",
+      "id": 42,
+      "fileName": "/workspace/src/example.ts",
+      "sourceText": "const value = { nested: true };\n",
+      "options": {
+        "lineWidth": 100,
+        "quoteStyle": "single",
+        "futureOption": {
+          "enabled": true,
+          "items": [1, "two", null]
+        }
+      }
+    }
+  },
+  {
+    "name": "shutdown request",
+    "direction": "client",
+    "message": {
+      "type": "shutdown"
+    }
+  },
+  {
+    "name": "initialized response",
+    "direction": "server",
+    "message": {
+      "type": "initialized",
+      "protocolVersion": 1,
+      "workerVersion": "0.1.0",
+      "oxfmtVersion": "0.0.0-test"
+    }
+  },
+  {
+    "name": "format result response",
+    "direction": "server",
+    "message": {
+      "type": "formatResult",
+      "id": 42,
+      "code": "const value = { nested: true };\n"
+    }
+  },
+  {
+    "name": "request error response",
+    "direction": "server",
+    "message": {
+      "type": "error",
+      "id": 42,
+      "error": {
+        "kind": "format",
+        "message": "failed to format file",
+        "stack": "Error: failed to format file\n    at worker",
+        "fileName": "/workspace/src/example.ts"
+      }
+    }
+  },
+  {
+    "name": "protocol error response",
+    "direction": "server",
+    "message": {
+      "type": "error",
+      "error": {
+        "kind": "protocol",
+        "message": "protocol version mismatch"
+      }
+    }
+  },
+  {
+    "name": "shutdown complete response",
+    "direction": "server",
+    "message": {
+      "type": "shutdownComplete"
+    }
+  }
+]
