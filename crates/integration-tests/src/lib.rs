@@ -100,9 +100,7 @@ mod tests {
     }
 
     fn node_program() -> PathBuf {
-        std::env::var_os("DPRINT_OXFMT_NODE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("node"))
+        std::env::var_os("DPRINT_OXFMT_NODE").map_or_else(|| PathBuf::from("node"), PathBuf::from)
     }
 
     fn oracle_path() -> PathBuf {
