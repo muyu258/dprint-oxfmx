@@ -11,20 +11,75 @@ use dprint_core::plugins::FormatResult;
 use dprint_core::plugins::HostFormatRequest;
 use dprint_core::plugins::PluginInfo;
 use dprint_core::plugins::PluginResolveConfigurationResult;
+use dprint_plugin_oxfmt::runtime_locator::RuntimeLocator;
+use dprint_plugin_oxfmt::worker_manager::WorkerFormatResult;
+use dprint_plugin_oxfmt::worker_manager::WorkerManager;
+use dprint_plugin_oxfmt::worker_manager::WorkerManagerError;
+use dprint_plugin_oxfmt::worker_protocol::DiagnosticSeverity;
 
 use crate::configuration::ResolvedConfiguration;
 use crate::configuration::resolve_configuration;
+#[cfg(test)]
 use crate::mock_worker::MockFormatRequest;
+#[cfg(test)]
 use crate::mock_worker::MockWorker;
 
 pub struct OxfmtPluginHandler {
-    worker: MockWorker,
+    worker: FormatterWorker,
+}
+
+enum FormatterWorker {
+    Node(Box<WorkerManager>),
+    #[cfg(test)]
+    Mock(MockWorker),
 }
 
 impl OxfmtPluginHandler {
-    pub fn new() -> Self {
+    pub fn new() -> Result<Self, FormatError> {
+        let locator = RuntimeLocator::discover().map_err(FormatError::new)?;
+        Ok(Self {
+            worker: FormatterWorker::Node(Box::new(WorkerManager::new(locator))),
+        })
+    }
+
+    #[cfg(test)]
+    fn new_with_mock() -> Self {
         Self {
-            worker: MockWorker::new(),
+            worker: FormatterWorker::Mock(MockWorker::new()),
+        }
+    }
+
+    #[cfg(test)]
+    fn mock_worker(&self) -> &MockWorker {
+        match &self.worker {
+            FormatterWorker::Mock(worker) => worker,
+            FormatterWorker::Node(_) => panic!("test handler must use the mock worker"),
+        }
+    }
+
+    async fn format_with_worker(
+        &self,
+        file_path: &std::path::Path,
+        source_text: &str,
+        options: &serde_json::Value,
+    ) -> Result<WorkerFormatResult, FormatError> {
+        match &self.worker {
+            FormatterWorker::Node(worker) => worker
+                .format(file_path, source_text, options)
+                .await
+                .map_err(format_worker_error),
+            #[cfg(test)]
+            FormatterWorker::Mock(worker) => {
+                let request = MockFormatRequest {
+                    file_name: file_path,
+                    source_text,
+                    options,
+                };
+                Ok(WorkerFormatResult {
+                    code: worker.format(&request),
+                    errors: Vec::new(),
+                })
+            }
         }
     }
 }
@@ -70,19 +125,43 @@ impl AsyncPluginHandler for OxfmtPluginHandler {
 
         let source_text = String::from_utf8(request.file_bytes)?;
         let file_path = absolute_path(request.file_path)?;
-        let mock_request = MockFormatRequest {
-            file_name: &file_path,
-            source_text: &source_text,
-            options: &request.config.options,
-        };
-        let output = self.worker.format(&mock_request);
+        let output = self
+            .format_with_worker(&file_path, &source_text, &request.config.options)
+            .await?;
 
-        if output == source_text {
+        if request.token.is_cancelled() {
+            return Ok(None);
+        }
+        if output
+            .errors
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+        {
+            return Err(format_diagnostics(&file_path, &output));
+        }
+        if output.code == source_text {
             Ok(None)
         } else {
-            Ok(Some(output.into_bytes()))
+            Ok(Some(output.code.into_bytes()))
         }
     }
+}
+
+fn format_worker_error(error: WorkerManagerError) -> FormatError {
+    FormatError::new(error)
+}
+
+fn format_diagnostics(file_path: &std::path::Path, result: &WorkerFormatResult) -> FormatError {
+    let details = result
+        .errors
+        .iter()
+        .map(|diagnostic| format!("{:?}: {}", diagnostic.severity, diagnostic.message))
+        .collect::<Vec<_>>()
+        .join("; ");
+    FormatError::new(format!(
+        "Oxfmt failed for {}: {details}",
+        file_path.display()
+    ))
 }
 
 fn absolute_path(file_path: PathBuf) -> Result<PathBuf, FormatError> {
@@ -108,8 +187,7 @@ mod tests {
             file_bytes,
             config_id: FormatConfigId::from_raw(1),
             config: Arc::new(ResolvedConfiguration {
-                options: serde_json::json!({ "lineWidth": 100 }),
-                project_root: None,
+                options: serde_json::json!({ "printWidth": 100 }),
             }),
             range: None,
             token: Arc::new(NullCancellationToken),
@@ -118,7 +196,7 @@ mod tests {
 
     #[test]
     fn forwards_an_absolute_path_source_and_options_to_the_mock_worker() {
-        let handler = OxfmtPluginHandler::new();
+        let handler = OxfmtPluginHandler::new_with_mock();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("failed creating test runtime");
@@ -133,17 +211,17 @@ mod tests {
 
         assert!(result.is_none());
         let forwarded = handler
-            .worker
+            .mock_worker()
             .last_request()
             .expect("request was not forwarded");
         assert!(forwarded.file_name.is_absolute());
         assert_eq!(forwarded.source_text, "const value=1;\n");
-        assert_eq!(forwarded.options, serde_json::json!({ "lineWidth": 100 }));
+        assert_eq!(forwarded.options, serde_json::json!({ "printWidth": 100 }));
     }
 
     #[test]
     fn rejects_invalid_utf8() {
-        let handler = OxfmtPluginHandler::new();
+        let handler = OxfmtPluginHandler::new_with_mock();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("failed creating test runtime");
@@ -159,7 +237,7 @@ mod tests {
 
     #[test]
     fn range_formatting_returns_no_change() {
-        let handler = OxfmtPluginHandler::new();
+        let handler = OxfmtPluginHandler::new_with_mock();
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("failed creating test runtime");
@@ -171,6 +249,6 @@ mod tests {
             .expect("range formatting should not fail");
 
         assert!(result.is_none());
-        assert!(handler.worker.last_request().is_none());
+        assert!(handler.mock_worker().last_request().is_none());
     }
 }

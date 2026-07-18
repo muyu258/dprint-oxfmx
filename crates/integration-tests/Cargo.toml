@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[dependencies]
+dprint-core = { version = "=0.68.2", default-features = false, features = ["process"] }
+tokio = { version = "1", features = ["rt", "time"] }
+
 [lints]
 workspace = true
 

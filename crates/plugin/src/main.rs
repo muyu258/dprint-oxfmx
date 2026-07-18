@@ -1,5 +1,6 @@
 mod configuration;
 mod handler;
+#[cfg(test)]
 mod mock_worker;
 
 use dprint_core::plugins::FormatError;
@@ -10,6 +11,7 @@ use handler::OxfmtPluginHandler;
 
 fn main() -> Result<(), FormatError> {
     let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
         .enable_time()
         .build()
         .expect("failed creating Tokio runtime");
@@ -19,6 +21,6 @@ fn main() -> Result<(), FormatError> {
             start_parent_process_checker_task(parent_process_id);
         }
 
-        handle_process_stdio_messages(OxfmtPluginHandler::new()).await
+        handle_process_stdio_messages(OxfmtPluginHandler::new()?).await
     })
 }
