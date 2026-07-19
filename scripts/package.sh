@@ -2,11 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-HOST_TARGET=$(rustc -vV | awk '/^host:/ { print $2 }')
-if [[ -z "$HOST_TARGET" ]]; then
-  printf 'Could not determine the Rust host target.\n' >&2
-  exit 1
-fi
+# shellcheck source=release-common.sh
+source "$ROOT_DIR/scripts/release-common.sh"
+
+for command_name in rustc cargo node pnpm tar zip mktemp cp mkdir rm tr; do
+  release_require_command "$command_name" "release packaging" || exit 4
+done
+
+HOST_TARGET=$(release_host_target) || exit 1
 if [[ -n "${TARGET:-}" && "$TARGET" != "$HOST_TARGET" ]]; then
   printf 'Cross-compilation is not supported: TARGET=%s, host=%s.\n' "$TARGET" "$HOST_TARGET" >&2
   exit 2
@@ -16,53 +19,12 @@ if [[ -n "${CARGO_BUILD_TARGET:-}" && "$CARGO_BUILD_TARGET" != "$HOST_TARGET" ]]
   exit 2
 fi
 
-case "$HOST_TARGET" in
-  aarch64-apple-darwin)
-    DPRINT_PLATFORM="darwin-aarch64"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  x86_64-apple-darwin)
-    DPRINT_PLATFORM="darwin-x86_64"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  aarch64-unknown-linux-gnu)
-    DPRINT_PLATFORM="linux-aarch64"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  x86_64-unknown-linux-gnu)
-    DPRINT_PLATFORM="linux-x86_64"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  aarch64-unknown-linux-musl)
-    DPRINT_PLATFORM="linux-aarch64-musl"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  x86_64-unknown-linux-musl)
-    DPRINT_PLATFORM="linux-x86_64-musl"
-    EXECUTABLE_SUFFIX=""
-    ;;
-  aarch64-pc-windows-msvc)
-    DPRINT_PLATFORM="windows-aarch64"
-    EXECUTABLE_SUFFIX=".exe"
-    ;;
-  x86_64-pc-windows-msvc)
-    DPRINT_PLATFORM="windows-x86_64"
-    EXECUTABLE_SUFFIX=".exe"
-    ;;
-  *)
-    printf 'Unsupported dprint process-plugin host target: %s.\n' "$HOST_TARGET" >&2
-    exit 3
-    ;;
-esac
-
-command -v zip >/dev/null 2>&1 || {
-  printf 'The zip command is required to package a dprint process plugin.\n' >&2
-  exit 4
-}
+DPRINT_PLATFORM=$(release_dprint_platform_for_target "$HOST_TARGET") || exit 3
+EXECUTABLE_SUFFIX=$(release_executable_suffix_for_target "$HOST_TARGET")
 
 PLUGIN_NAME="dprint-plugin-oxfmt"
 EXECUTABLE_NAME="$PLUGIN_NAME$EXECUTABLE_SUFFIX"
-RUNTIME_VERSION=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).version)' "$ROOT_DIR/runtime/package.json")
+RUNTIME_VERSION=$(release_runtime_version "$ROOT_DIR/runtime/package.json")
 EXPECTED_NODE_VERSION=$(tr -d '[:space:]' < "$ROOT_DIR/.node-version")
 ACTUAL_NODE_VERSION=$(node --version)
 if [[ "$ACTUAL_NODE_VERSION" != "v$EXPECTED_NODE_VERSION" ]]; then
@@ -131,18 +93,7 @@ fi
   zip -q -r "$PLATFORM_ZIP" "$EXECUTABLE_NAME" runtime
 )
 
-sha256_file() {
-  node -e '
-const { createHash } = require("node:crypto");
-const { createReadStream } = require("node:fs");
-const stream = createReadStream(process.argv[1]);
-const hash = createHash("sha256");
-stream.on("data", chunk => hash.update(chunk));
-stream.on("end", () => console.log(hash.digest("hex")));
-' "$1"
-}
-
-ZIP_CHECKSUM=$(sha256_file "$PLATFORM_ZIP")
+ZIP_CHECKSUM=$(release_sha256_file "$PLATFORM_ZIP")
 node --input-type=module - "$BUNDLE_DIR/plugin.json" "$PLUGIN_NAME" "$VERSION" "$DPRINT_PLATFORM" "$PLATFORM_ZIP_NAME" "$ZIP_CHECKSUM" <<'NODE'
 import { writeFileSync } from "node:fs";
 
@@ -158,7 +109,7 @@ writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 
 tar -czf "$ARCHIVE" -C "$BUNDLE_DIR" plugin.json "$PLATFORM_ZIP_NAME"
-ARCHIVE_CHECKSUM=$(sha256_file "$ARCHIVE")
+ARCHIVE_CHECKSUM=$(release_sha256_file "$ARCHIVE")
 printf '%s  %s\n' "$ARCHIVE_CHECKSUM" "$(basename "$ARCHIVE")" > "$ARCHIVE.sha256"
 printf 'Created %s\n' "$ARCHIVE"
 printf 'Checksum %s\n' "$ARCHIVE.sha256"

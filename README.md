@@ -54,7 +54,9 @@ diagnostic cases.
 
 ## Build a release package
 
-The package script requires Rust, Node 24.16.0, pnpm 10.30.3, `tar`, and `zip`:
+The package script requires Rust, Node 24.16.0, pnpm 10.30.3, `tar`, and `zip`.
+The release smoke additionally requires `unzip` and dprint 0.55.1. On Windows,
+run the scripts from Git Bash with those archive tools available on `PATH`:
 
 ```bash
 scripts/package.sh
@@ -64,7 +66,8 @@ Cross-compilation is intentionally not supported. The script builds for the
 current Rust host and emits a manifest containing only that real host artifact;
 it does not add placeholder entries for other platforms.
 
-The generated outer bundle is written under `dist/releases`:
+The generated outer bundle is written under the Git-ignored `dist/releases`
+directory:
 
 ```text
 dprint-plugin-oxfmt-0.1.0-<rust-host>.tar.gz
@@ -87,7 +90,11 @@ for example:
 archive=dist/releases/dprint-plugin-oxfmt-0.1.0-aarch64-apple-darwin.tar.gz
 (
   cd "$(dirname "$archive")"
-  shasum -a 256 --check "$(basename "$archive").sha256"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum --check "$(basename "$archive").sha256"
+  else
+    shasum -a 256 --check "$(basename "$archive").sha256"
+  fi
 )
 mkdir -p .dprint-plugin-oxfmt
 tar -xzf "$archive" -C .dprint-plugin-oxfmt
@@ -104,11 +111,22 @@ Run the same real-CLI package smoke used by release CI with:
 scripts/smoke-dprint-cli.sh "$archive"
 ```
 
-This requires dprint CLI 0.55.1 (the version pinned in `.dprint-version`) and
-validates TypeScript, JavaScript, `singleQuote`, unchanged input, and syntax-error
-behavior through the unpacked release. Set `DPRINT_BIN` when that executable is
-not the `dprint` found on `PATH`; release CI installs it in an isolated temporary
-directory rather than using the repository development `node_modules`.
+This requires dprint CLI 0.55.1 (the version pinned in `.dprint-version`). The
+smoke validates the outer sidecar, the tar and platform ZIP path boundaries, the
+single manifest platform against the current Rust host, and the ZIP checksum. It
+also proves that incorrect manifest and platform checksums are rejected, loads the
+packaged Oxfmt production dependency, and checks the executable's sibling
+`runtime/dist` layout in an isolated dprint cache. Finally, it validates TypeScript,
+JavaScript, `singleQuote`, unchanged input, and syntax-error behavior through the
+unpacked release. Set `DPRINT_BIN` when that executable is not the `dprint` found
+on `PATH`; release CI installs it in an isolated temporary directory rather than
+using the repository development `node_modules`.
+
+The Release workflow runs the same host-native package and smoke flow on
+`ubuntu-latest`, `macos-latest`, and `windows-latest`. A manual run or `v*` tag
+uploads one checksummed GitHub Actions artifact per runner, named with the runner
+OS and architecture. It does not create a GitHub Release or combine the three
+single-platform manifests.
 
 ## Configure dprint
 
@@ -117,7 +135,8 @@ A process-plugin manifest reference must include the SHA-256 of the exact
 
 ```bash
 manifest=.dprint-plugin-oxfmt/plugin.json
-manifest_checksum=$(shasum -a 256 "$manifest" | cut -d ' ' -f 1)
+source scripts/release-common.sh
+manifest_checksum=$(release_sha256_file "$manifest")
 printf '%s\n' "$manifest_checksum"
 ```
 
@@ -165,7 +184,10 @@ There are three distinct checksums in the release flow:
 ## Current release limitations
 
 - Node is a required system dependency and is not bundled.
-- Each generated package contains only the current host artifact.
+- Each generated package and uploaded Actions artifact contains only the current
+  runner host artifact.
+- Release validation uploads Actions artifacts but does not create a GitHub
+  Release.
 - The project does not yet perform Cargo cross compilation or publish a combined
   multi-platform process-plugin manifest.
 
