@@ -11,8 +11,16 @@ permissions:
 
 jobs:
   package:
-    name: Package release artifact
-    runs-on: ubuntu-latest
+    name: Package and verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -32,7 +40,13 @@ jobs:
           cache: pnpm
           cache-dependency-path: runtime/pnpm-lock.yaml
 
+      - name: Set up archive tools on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: choco install zip --yes --no-progress
+
       - name: Build package
+        shell: bash
         run: scripts/package.sh
 
       - name: Install pinned dprint CLI
@@ -40,14 +54,23 @@ jobs:
         run: |
           set -euo pipefail
           dprint_version=$(tr -d '[:space:]' < .dprint-version)
-          dprint_prefix="$RUNNER_TEMP/dprint-cli"
+          runner_temp="$RUNNER_TEMP"
+          if command -v cygpath >/dev/null 2>&1; then
+            runner_temp=$(cygpath -u "$runner_temp")
+          fi
+          dprint_prefix="$runner_temp/dprint-cli"
           npm install \
             --prefix "$dprint_prefix" \
             --ignore-scripts \
             --no-package-lock \
             --no-save \
             "dprint@$dprint_version"
-          printf 'DPRINT_BIN=%s/node_modules/.bin/dprint\n' "$dprint_prefix" >> "$GITHUB_ENV"
+          dprint_bin="$dprint_prefix/node_modules/.bin/dprint"
+          if [[ ! -f "$dprint_bin" ]]; then
+            dprint_bin="$dprint_prefix/node_modules/.bin/dprint.cmd"
+          fi
+          test -f "$dprint_bin"
+          printf 'DPRINT_BIN=%s\n' "$dprint_bin" >> "$GITHUB_ENV"
 
       - name: Verify package with dprint CLI
         shell: bash
@@ -62,7 +85,8 @@ jobs:
       - name: Upload checksummed artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dprint-plugin-oxfmt-release
+          name: dprint-plugin-oxfmt-${{ runner.os }}-${{ runner.arch }}
           path: |
             dist/releases/*.tar.gz
             dist/releases/*.sha256
+          if-no-files-found: error
