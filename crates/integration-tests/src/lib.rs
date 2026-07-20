@@ -101,9 +101,39 @@ mod tests {
             if unchanged {
                 assert_eq!(result, None, "{name} should report no change");
             } else {
-                assert_eq!(result, Some(expected), "{name} output should match Oxfmt");
+                // Git may check out fixtures with CRLF on Windows while Oxfmt emits LF.
+                assert_eq!(
+                    result.map(|bytes| normalize_line_endings(&bytes)),
+                    Some(normalize_line_endings(&expected)),
+                    "{name} output should match Oxfmt"
+                );
             }
         }
+    }
+
+    fn normalize_line_endings(bytes: &[u8]) -> Vec<u8> {
+        let mut normalized = Vec::with_capacity(bytes.len());
+        let mut index = 0;
+        while index < bytes.len() {
+            if bytes[index] == b'\r' {
+                if bytes.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+                normalized.push(b'\n');
+            } else {
+                normalized.push(bytes[index]);
+            }
+            index += 1;
+        }
+        normalized
+    }
+
+    #[test]
+    fn normalizes_all_supported_line_endings_to_lf() {
+        assert_eq!(
+            normalize_line_endings(b"first\r\nsecond\rthird\nfourth"),
+            b"first\nsecond\nthird\nfourth"
+        );
     }
 
     async fn verify_syntax_error(communicator: &ProcessPluginCommunicator) {
