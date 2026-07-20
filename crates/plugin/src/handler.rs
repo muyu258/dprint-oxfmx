@@ -125,8 +125,10 @@ impl AsyncPluginHandler for OxfmtPluginHandler {
 
         let source_text = String::from_utf8(request.file_bytes)?;
         let file_path = absolute_path(request.file_path)?;
+        let source_line_ending = preferred_line_ending(&source_text);
+        let worker_source = normalize_line_endings(&source_text);
         let output = self
-            .format_with_worker(&file_path, &source_text, &request.config.options)
+            .format_with_worker(&file_path, &worker_source, &request.config.options)
             .await?;
 
         if request.token.is_cancelled() {
@@ -139,10 +141,11 @@ impl AsyncPluginHandler for OxfmtPluginHandler {
         {
             return Err(format_diagnostics(&file_path, &output));
         }
-        if output.code == source_text {
+        let output_code = restore_line_endings(&output.code, source_line_ending);
+        if output_code == source_text {
             Ok(None)
         } else {
-            Ok(Some(output.code.into_bytes()))
+            Ok(Some(output_code.into_bytes()))
         }
     }
 }
@@ -169,6 +172,41 @@ fn absolute_path(file_path: PathBuf) -> Result<PathBuf, FormatError> {
         Ok(file_path)
     } else {
         Ok(std::env::current_dir()?.join(file_path))
+    }
+}
+
+fn preferred_line_ending(source_text: &str) -> &'static str {
+    if source_text.contains("\r\n") {
+        "\r\n"
+    } else if source_text.contains('\r') {
+        "\r"
+    } else {
+        "\n"
+    }
+}
+
+fn normalize_line_endings(text: &str) -> String {
+    let mut normalized = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character == '\r' {
+            if chars.peek() == Some(&'\n') {
+                chars.next();
+            }
+            normalized.push('\n');
+        } else {
+            normalized.push(character);
+        }
+    }
+    normalized
+}
+
+fn restore_line_endings(text: &str, line_ending: &str) -> String {
+    let normalized = normalize_line_endings(text);
+    if line_ending == "\n" {
+        normalized
+    } else {
+        normalized.replace('\n', line_ending)
     }
 }
 
@@ -217,6 +255,29 @@ mod tests {
         assert!(forwarded.file_name.is_absolute());
         assert_eq!(forwarded.source_text, "const value=1;\n");
         assert_eq!(forwarded.options, serde_json::json!({ "printWidth": 100 }));
+    }
+
+    #[test]
+    fn preserves_crlf_line_endings_from_the_source() {
+        let handler = OxfmtPluginHandler::new_with_mock();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("failed creating test runtime");
+
+        let result = runtime
+            .block_on(
+                handler.format(test_request(b"const value = 1;\r\n".to_vec()), |_request| {
+                    Box::pin(async { Ok(None) })
+                }),
+            )
+            .expect("mock formatting should succeed");
+
+        assert!(result.is_none());
+        let forwarded = handler
+            .mock_worker()
+            .last_request()
+            .expect("request was not forwarded");
+        assert_eq!(forwarded.source_text, "const value = 1;\n");
     }
 
     #[test]
